@@ -2,9 +2,9 @@
 
 This repository provides you with the three basic code snippets relevant for the uStepper S32 WiFi Shield:
 
-1. uStepper WiFi GUI - providing you with an easy and intuitive way to control a single uStepper S32 manually while also providing the ability to record and replay sequences of operation
-2. UART bridge - a simple piece of software that bridges the uStepper S32 Modbus interface to the RS485 physical interface on the uStepper S32 WiFi Shield
-3. ESPHome - a yaml file for ESPHome enabling you to expose the uStepper S32 Modbus interface in ESPHome compatile smart home systems which at the time of writing is Home Assistant and to some extent Homey
+1. **uStepper WiFi GUI** - providing you with an easy and intuitive way to control a single uStepper S32 manually while also providing the ability to record and replay sequences of operation
+2. **UART bridge** - a simple piece of software that bridges the uStepper S32 Modbus interface to the RS485 physical interface on the uStepper S32 WiFi Shield
+3. **ESPHome** - a .yaml file for ESPHome enabling you to expose the uStepper S32 Modbus interface in ESPHome compatile smart home systems which at the time of writing is Home Assistant and to some extent Homey
 
 ## uStepper WiFi GUI
 https://docs.espressif.com/projects/esp-test-tools/en/latest/esp32/production_stage/tools/flash_download_tool.html
