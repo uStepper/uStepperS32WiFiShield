@@ -27,6 +27,8 @@ wifi:
     password: ""
 
 captive_portal:
+#web_server:
+#  local: true
 
 uart:
   id: uart_modbus
