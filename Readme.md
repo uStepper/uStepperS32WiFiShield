@@ -8,6 +8,7 @@ This repository provides you with the three basic code snippets relevant for the
 
 ## Flashing the binaries
 To get the functionality of either GUI, Modbus RTU or ESPHome interface we have provided the compiled binaries for you to upload using the Espressif Flash Download Tool:
+
 https://docs.espressif.com/projects/esp-test-tools/en/latest/esp32/production_stage/tools/flash_download_tool.html
 
 Simply connect the uStepper S32 WiFi Shield to you computer using the USB-C interface, open the tool, select ESP32-C3 as chip and press OK. You now see the picture where you must select the binary and ensure the right column says 0x0000. Select the appropriate COM port - if it is not available, find the boot and reset buttons on the uStepper S32 WiFi Shield, press and hold boot and shortly press reset before releasing boot again - now the board is forced into programming mode and should be visible as a COM port. Push start and wait until the programming is done.
@@ -36,7 +37,9 @@ All network nodes must share a common ground connection as the bus signals shall
 120 Ohm resistors shall be connected between the two RS485 signal wires at each end-point of the bus wire. The resistor value shall match the characteristic impedance of the cable.
 
 ## Modbus Protocol description
-Details on the protocol can be found here: LINK TIL USTEPPR MODBUS DESCR.
+Details on the protocol can be found here:
+
+[Modbus Documentation](./docs/ModbusUtilitiesDocumentation.md)
 
 ## ESPHome Modbus Interface
 Loading the ESPHome binary on the uStepper S32 WiFi Shield and the Modbus example code on the uStepper S32 enables the integration of uStepper S32 in e.g., Home Assistant.
