@@ -16,7 +16,7 @@ Simply connect the uStepper S32 WiFi Shield to you computer using the USB-C inte
 ![ESP Flash Tool](doc/espflashtool.jpg)
 
 ## Building the code
-To build the code for the uStepper S32 WiFi Shield GUI and UART Bridge, you must use the Ardunio IDE with library dependencies installed and support for ESP32C3 boards. For the ESPHome code a .yaml file is provided to be compiled in ESPHome.
+If you for some reason wish not to use the compiled binaries and build the code yourself for the uStepper S32 WiFi Shield GUI and UART Bridge, you must use the Ardunio IDE with library dependencies installed and support for ESP32C3 boards. For the ESPHome code a .yaml file is provided to be compiled in ESPHome.
 
 ## uStepper WiFi GUI
 The uStepper S32 WiFi GUI is hosted on the WiFi shield and thus requires no application on your interface device - meaning that you can connect to the WiFi Shields Exposed Access Point, open a browser and enter 192.168.4.1 to get the interface exposed on any device.
