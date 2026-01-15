@@ -39,9 +39,14 @@ All network nodes must share a common ground connection as the bus signals shall
 ## Modbus Protocol description
 Details on the protocol can be found here:
 
-[Modbus Documentation](./docs/ModbusUtilitiesDocumentation.md)
+[Modbus Documentation](https://github.com/uStepper/uStepperS32/blob/modbusfeature/docs/ModbusUtilitiesDocumentation.md)
 
 ## ESPHome Modbus Interface
 Loading the ESPHome binary on the uStepper S32 WiFi Shield and the Modbus example code on the uStepper S32 enables the integration of uStepper S32 in e.g., Home Assistant.
 
 ![ESPHome interface](doc/esphome.png)
+
+## WiFi Shield Schematic
+The uStepper S32 WiFi Shield embeds an SP3485 transceiver and other components as shown on the schematic here:
+
+![Schematic](doc/schematic.png)
