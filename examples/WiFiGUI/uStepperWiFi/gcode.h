@@ -8,7 +8,7 @@
 #define MAX_PACKET_SIZE 200
 #define MAX_COMMAND_SIZE 10
 /** Time before a packet is considered received in microseconds */
-#define PACKET_TIMEOUT 10000 // 10ms
+#define PACKET_TIMEOUT 50000 // 50ms - enough for full packet at 115200 baud
 
 #define GCODE_DEFAULT_VALID_RES "OK"
 #define GCODE_DEFAULT_ERROR_RES "ERROR"

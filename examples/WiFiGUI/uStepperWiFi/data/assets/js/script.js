@@ -75,9 +75,9 @@ var commandAck = false; 		// Flag to check if the last sent command was complete
 var commandsSend = 0; 			// Keeping track of numbers of commands sent
 var requestTlm = false;
 var configRead = false;
-var websocketCnt = 0;
-var lastVelocity = 0.0;
 var currentLinenum = 0;
+
+var loopIntervalId = null;
 
 var positionUnit 		= APP_UNIT_DEGREES;
 var velocityUnit 		= STEPPER_UNIT_RPM;
@@ -146,7 +146,6 @@ posUnitSelect.onchange = function(event) {
 	}
 };
 
-// Add events for selects
 velUnitSelect.onchange = function(event) {
 	var value = event.target.value;
 
@@ -181,7 +180,6 @@ velUnitSelect.onchange = function(event) {
 	}
 };
 
-// Add events for brake method select
 brakeSelect.onchange = function(event) {
 	var value = event.target.value;
 
@@ -355,20 +353,36 @@ function stopRecording()
 	playBtn.innerHTML = '<i class="icon-play"></i>';
 	recordBtn.style = "color:white";
 	recording = false;
-	playingRecording = false;	
+	playingRecording = false;
+	recordLineBtn.classList.add('d-none');
 }
 
 // Home the device
+var isHoming = false;
+
 homeBtn.onclick = function(){
+	if (isHoming) return;
+	isHoming = true;
+	homeBtn.disabled = true;
+
 	// Stop any on-going recording
 	requestTlm = false;
-	stopRecording();
+	playBtn.innerHTML = '<i class="icon-play"></i>';
+	recordBtn.style = "color:white";
+	recording = false;
+	playingRecording = false;
 
 	sendCommand( GCODE_HOME, [
 		{name: "V", value: conf.homeVelocity},
 		{name: "T", value: conf.homeThreshold},
 		{name: "D", value: conf.homeDirection}
 	]);
+
+	// Safety net: re-enable home button after timeout
+	setTimeout(function() {
+		isHoming = false;
+		homeBtn.disabled = false;
+	}, 15000);
 };
 
 // Stop all operations
@@ -381,6 +395,7 @@ emergencyBtn.onclick = function(){
 
 
 moveCWBtn.onclick = function(){
+	if (isHoming) return;
 
 	var step = 0;
 
@@ -394,6 +409,7 @@ moveCWBtn.onclick = function(){
 }
 
 moveCCWBtn.onclick = function(){
+	if (isHoming) return;
 
 	var step = 0;
 
@@ -416,7 +432,6 @@ closedLoopCheck.onchange = function(){
 	}
 };
 
-// Start and stop recording
 recordBtn.onclick = function(){
 	if(! recording ){
 		sendCommand( GCODE_RECORD_START );
@@ -461,38 +476,37 @@ accelerationInput.onchange = function(){
 	sendCommand(GCODE_SET_ACCEL, [{name: "A", value: conf.acceleration}]);
 }
 
-// Timer function to keep the 
-var websocketInterval = function() {
-
-    // If a connection is established
-	if(websocket.readyState == 1){
-		// If the configuration has been read
-		if( configRead ){
-			// Toggle between control command and telemetry
-			if(websocketCnt === 0){
-				velocity = joystickControl();
-
-				if(velocity != lastVelocity){
-					
-					sendCommand( GCODE_CONTINUOUS, [{name: "A", value: velocity}] );
-					
-				}
-
-				lastVelocity = velocity;
-
-				websocketCnt = 1;
-			}
-			else if(websocketCnt === 1){
-				if( requestTlm )
-					sendCommand( GCODE_REQUEST_DATA );
-
-				websocketCnt = 0;
-			}
-		}
+function stopLoop() {
+	if(loopIntervalId !== null){
+		clearInterval(loopIntervalId);
+		loopIntervalId = null;
 	}
+}
 
-	// Set next timeout
-    setTimeout(websocketInterval, wsInterval);
+function startLoop() {
+	stopLoop();
+	var lastVel = 0;
+	var loopPhase = 0;
+	loopIntervalId = setInterval(function() {
+		if(websocket.readyState != 1) return;
+		if(!configRead) return;
+
+		if(loopPhase === 0) {
+			// Send velocity command only on change (skip during homing)
+			var vel = isHoming ? 0 : parseFloat(joystickControl());
+			if(vel !== lastVel) {
+				sendCommand(GCODE_CONTINUOUS, [{name: "A", value: vel}]);
+				lastVel = vel;
+			}
+			loopPhase = 1;
+		} else {
+			// Request telemetry
+			if(requestTlm)
+				sendCommand(GCODE_REQUEST_DATA);
+			loopPhase = 0;
+		}
+
+	}, wsInterval);
 }
 
 function joystickControl(){
@@ -510,7 +524,6 @@ function joystickControl(){
 	return 0;
 }
 
-// Function to initialize the websocket communication
 function initWebSocket(){
 	// If websocket is active, close connection
 	if( websocket ){
@@ -537,11 +550,9 @@ function initWebSocket(){
 
 	requestTlm = true;
 
-	// Initiate timer to retry the websocket if no connection is made
-	setTimeout(websocketInterval, wsInterval);
+	startLoop();
 }
 
-// Function to send a command / gcode through the websocket to the ESP
 function sendCommand( command, params = [] ){
 	var gcode = command;
 
@@ -564,13 +575,15 @@ function onWsOpen(event) {
 
 	loaderElm.classList.add('hidden');
 
-	// When connection first is opened, request configuration
+	// When connection first is opened, stop any motion and request configuration
+	sendCommand( GCODE_CONTINUOUS, [{name: "A", value: 0}] );
 	sendCommand( GCODE_REQUEST_CONFIG );
 }
 
 function onWsClose(event) {
 	addToLog("Websocket connection lost");
-	setStatus("No connection", "danger")
+	setStatus("No connection", "danger");
+	stopLoop();
 }
 
 // Whenever a message is received from the ESP
@@ -587,44 +600,56 @@ function onWsMessage(event) {
 		var items = data.split(" ");
 		items.shift(); // Remove "DATA" from string
 
-		for (var i in items) {
-			// Remove the prefix of each datastring f.x. P, T and S of "TLM P20 T450 S0"
-	    	values[i] = items[i].substring(1, items[i].length);
+		for (var i = 0; i < items.length; i++) {
+			// Remove the prefix letter: "A123.45" → "123.45"
+			values[i] = items[i].substring(1);
 		}
 
+		var pos = parseFloat(values[0]);
+		var stp = parseInt(values[1]);
+		var vel = values[2] !== undefined ? parseFloat(values[2]) : NaN;
+		var driverVel = values[3] !== undefined ? parseFloat(values[3]) : NaN;
 
-		tlm.posistion 		= parseFloat(values[0])%DEGREES_PER_REV;
-		tlm.absPosition 	= parseFloat(values[0]);
-		tlm.steps 			= parseInt(values[1])%STEPS_PER_REV;
-		tlm.absSteps		= parseInt(values[1]);
-		tlm.encoderVelocity = parseFloat(values[2]);
-		tlm.driverVelocity 	= parseFloat(values[3]);
+		if( !isNaN(pos) ){
+			tlm.posistion = pos % DEGREES_PER_REV;
+			tlm.absPosition = pos;
+		}
+		if( !isNaN(stp) ){
+			tlm.steps = stp % STEPS_PER_REV;
+			tlm.absSteps = stp;
+		}
+		if( !isNaN(vel) ){
+			tlm.encoderVelocity = vel;
+		}
+		if( !isNaN(driverVel) ){
+			tlm.driverVelocity = driverVel;
+		}
 
 		// Print values to GUI
 		if( positionUnit == APP_UNIT_DEGREES ){
-			dataPositionElm.value 			= tlm.posistion.toFixed(2);
-			dataAbsPositionElm.value 		= tlm.absPosition.toFixed(2);
-			dataPositionDriverElm.value 	= (tlm.steps/STEPS_PER_REV*DEGREES_PER_REV).toFixed(2); 	// Convert microsteps to angle
-			dataAbsPositionDriverElm.value 	= (tlm.absSteps/STEPS_PER_REV*DEGREES_PER_REV).toFixed(2); 	// Convert microsteps to angle
+			dataPositionElm.value 			= isNaN(tlm.posistion) ? "0.00" : tlm.posistion.toFixed(2);
+			dataAbsPositionElm.value 		= isNaN(tlm.absPosition) ? "0.00" : tlm.absPosition.toFixed(2);
+			dataPositionDriverElm.value 	= isNaN(tlm.steps) ? "0.00" : (tlm.steps/STEPS_PER_REV*DEGREES_PER_REV).toFixed(2);
+			dataAbsPositionDriverElm.value 	= isNaN(tlm.absSteps) ? "0.00" : (tlm.absSteps/STEPS_PER_REV*DEGREES_PER_REV).toFixed(2);
 		}else{
-			dataPositionElm.value 			= (tlm.posistion.toFixed(2)/DEGREES_PER_REV*FULLSTEPS).toFixed(2); 	// Convert angle to steps
-			dataAbsPositionElm.value 		= (tlm.absPosition.toFixed(2)/DEGREES_PER_REV*FULLSTEPS).toFixed(2); // Convert angle to steps
-			dataPositionDriverElm.value 	= (tlm.steps/MICROSTEPS).toFixed(2);
-			dataAbsPositionDriverElm.value 	= (tlm.absSteps/MICROSTEPS).toFixed(2);
+			dataPositionElm.value 			= isNaN(tlm.posistion) ? "0.00" : (tlm.posistion/DEGREES_PER_REV*FULLSTEPS).toFixed(2);
+			dataAbsPositionElm.value 		= isNaN(tlm.absPosition) ? "0.00" : (tlm.absPosition/DEGREES_PER_REV*FULLSTEPS).toFixed(2);
+			dataPositionDriverElm.value 	= isNaN(tlm.steps) ? "0.00" : (tlm.steps/MICROSTEPS).toFixed(2);
+			dataAbsPositionDriverElm.value 	= isNaN(tlm.absSteps) ? "0.00" : (tlm.absSteps/MICROSTEPS).toFixed(2);
 		}
-		var value = parseFloat(velocityInput.value);
 
-		// Input velocity is in RPM
+		var velDisplay = isNaN(tlm.encoderVelocity) ? 0 : tlm.encoderVelocity;
 		if(velocityUnit == STEPPER_UNIT_RPM){
-		dataVelocityElm.value 			= tlm.encoderVelocity.toFixed(2);
-		dataVelocityDriverElm.value 	= tlm.driverVelocity.toFixed(2);
+			dataVelocityElm.value 			= velDisplay.toFixed(2);
+			dataVelocityDriverElm.value 	= velDisplay.toFixed(2);
 		}else{
-		dataVelocityElm.value 			= (tlm.encoderVelocity*RPM_TO_STEP).toFixed(2);
-		dataVelocityDriverElm.value 	= (tlm.driverVelocity*RPM_TO_STEP).toFixed(2);
+			dataVelocityElm.value 			= (velDisplay*RPM_TO_STEP).toFixed(2);
+			dataVelocityDriverElm.value 	= (velDisplay*RPM_TO_STEP).toFixed(2);
 		}
 
 		// Animate arrow to show position
-		anglePointer.style.transform 	= 'rotate('+tlm.posistion+'deg)';
+		if( !isNaN(tlm.posistion) )
+			anglePointer.style.transform = 'rotate('+tlm.posistion+'deg)';
 	}
 	else if(data.includes("CONF")){
 		var values = [];
@@ -632,30 +657,37 @@ function onWsMessage(event) {
 		var items = data.split(" ");
 		items.shift(); // Remove "CONF" from string
 
-		for (var i in items) {
+		for (var i = 0; i < items.length; i++) {
 			// Remove the prefix of each datastring
-	    	values[i] = items[i].substring(1, items[i].length);
+			values[i] = items[i].substring(1);
 		}
 
-		conf.velocity 		= parseFloat(values[0]).toFixed(2); // in steps/s
-		conf.acceleration 	= parseFloat(values[1]).toFixed(2); // in steps/s^2
-		conf.brakeMethod 	= parseInt(values[2]);
-		conf.closedLoop 	= parseInt(values[3]);
-		conf.homeVelocity	= parseFloat(values[4]).toFixed(2);
-		conf.homeThreshold 	= parseInt(values[5]);
-		conf.homeDirection 	= parseInt(values[6]);
+		if( values[0] !== undefined && !isNaN(parseFloat(values[0])) )
+			conf.velocity = parseFloat(values[0]); // in steps/s
+		if( values[1] !== undefined && !isNaN(parseFloat(values[1])) )
+			conf.acceleration = parseFloat(values[1]); // in steps/s^2
+		if( values[2] !== undefined )
+			conf.brakeMethod = parseInt(values[2]);
+		if( values[3] !== undefined )
+			conf.closedLoop = parseInt(values[3]);
+		if( values[4] !== undefined && !isNaN(parseFloat(values[4])) )
+			conf.homeVelocity = parseFloat(values[4]);
+		if( values[5] !== undefined )
+			conf.homeThreshold = parseInt(values[5]);
+		if( values[6] !== undefined )
+			conf.homeDirection = parseInt(values[6]);
 
 		if( velocityUnit == STEPPER_UNIT_RPM )
-			velocityInput.value = (conf.velocity*STEP_TO_RPM).toFixed(2); // Get it as RPM
+			velocityInput.value = (conf.velocity*STEP_TO_RPM).toFixed(2);
 		else
-			velocityInput.value = conf.velocity; 
+			velocityInput.value = conf.velocity.toFixed(2);
 
 		if( velocityUnit == STEPPER_UNIT_RPM)
-			accelerationInput.value = (conf.acceleration*STEP_TO_RPM).toFixed(2); // Get it as RPM/s
+			accelerationInput.value = (conf.acceleration*STEP_TO_RPM).toFixed(2);
 		else
-			accelerationInput.value = conf.acceleration;
+			accelerationInput.value = conf.acceleration.toFixed(2);
 
-		homeVelInput.value = conf.homeVelocity;
+		homeVelInput.value = conf.homeVelocity.toFixed(2);
 		homeThrsInput.value = conf.homeThreshold;
 		homeDirSelect.value = conf.homeDirection;
 
@@ -670,6 +702,10 @@ function onWsMessage(event) {
 		// uStepper is done after blocking operation.
 		// Safely begin request of data again
 		requestTlm = true;
+		if (isHoming) {
+			isHoming = false;
+			homeBtn.disabled = false;
+		}
 	}
 	else if(data.includes("LINE")){
 		var items = data.split(" ");

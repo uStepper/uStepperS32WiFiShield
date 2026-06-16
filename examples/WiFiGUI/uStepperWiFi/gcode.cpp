@@ -99,25 +99,24 @@ bool GCode::check(char *cmd ) {
 
 bool GCode::check(char *cmd, char *packet ) {
 	char buf[10] = {'\0'};
-	uint8_t len = 0;
 
-	// The first part is always the command
-	char *start = &packet[0];
 	char *end = strpbrk(packet, " \n");
 
-	// If no end is found, the command is the entire packet
-	if( end == NULL ){
+	size_t len;
+	if (end == NULL) {
 		len = strlen(packet);
-	}else{
-		len = end - start;
+	} else {
+		len = end - packet;
 	}
 
-	strncpy(buf, packet, len);
-
-	if (strcmp(buf, cmd) == 0) {
-		return true;
+	if (len > sizeof(buf) - 1) {
+		len = sizeof(buf) - 1;
 	}
-	return false;
+
+	memcpy(buf, packet, len);
+	buf[len] = '\0';
+
+	return strcmp(buf, cmd) == 0;
 }
 
 char *GCode::getPacket(void) {
@@ -148,40 +147,37 @@ bool GCode::value(char *name, int32_t *var, char *packet ){
 }
 
 bool GCode::value(char *name, float *var, char *packet ) {
-	char *start;
-	char *end;
-	size_t len;
-
-	char buf[20] = {'\0'};
-
-	// Find start of parameter value
-	if (start = strstr(packet, name)) {
-
-		// Not interested in the param name, f.x. the X in "G1 X10"
-		start++;
-
-		// Find end of parameter value by searching for a space or newline
-		end = strpbrk(start, " \n");
-		
-		if( end == NULL ){
-			len = strlen(packet);
-		}else{
-			len = end - start;
-		}
-
-		// Check if there is an argument, otherwise return false 
-		if( len > 0 ){
-			strncpy(buf, start, len);
-			buf[len] = '\0';
-
-			// Now convert the string in buf to a float
-			*var = atof(buf);
-			return true;
-		}
-		
+	char *start = strstr(packet, name);
+	if (!start) {
+		return false;
 	}
 
-	return false;
+	// Skip past the parameter name
+	start++;
+
+	char *end = strpbrk(start, " \n");
+
+	size_t len;
+	if (end == NULL) {
+		len = strlen(start);
+	} else {
+		len = end - start;
+	}
+
+	if (len == 0) {
+		return false;
+	}
+
+	char buf[24] = {'\0'};
+	if (len > sizeof(buf) - 1) {
+		len = sizeof(buf) - 1;
+	}
+
+	memcpy(buf, start, len);
+	buf[len] = '\0';
+
+	*var = atof(buf);
+	return true;
 }
 
 void GCode::insert(char data){
@@ -195,16 +191,20 @@ void GCode::insert(char data){
 }
 
 void GCode::insert(char *data){
-	this->lastChar = micros();
+	// Reset packet state and copy complete string
+	this->packetLen = 0;
+	memset(this->packet, 0, sizeof(this->packet));
 	this->inPacket = true;
 
-	strncpy(this->packet, data, MAX_PACKET_SIZE);
+	strncpy(this->packet, data, MAX_PACKET_SIZE - 1);
+	this->packetLen = strlen(this->packet);
+	this->lastChar = micros();
 }
 
 uint8_t GCode::process(void){
 
-	float crc; 	// Variable to hold checksum 
-	char end = this->packet[this->packetLen]; // Get the most end character
+	float crc;
+	bool hasNewline = this->packetLen > 0 && this->packet[this->packetLen - 1] == '\n';
 
 	// If no packet is incoming, and some old packet is still in the buffer clear the old packet
 	if ( this->inPacket == false && this->packetLen > 0) {
@@ -214,8 +214,13 @@ uint8_t GCode::process(void){
 	}
 
 	// If the timeout has been reached, or a newline has been received the string is complete
-	if ((micros() - lastChar >= PACKET_TIMEOUT || end == '\n') && inPacket == true) {
+	if ((micros() - lastChar >= PACKET_TIMEOUT || hasNewline) && inPacket == true) {
 		inPacket = false;
+
+		// Strip trailing newline so handlers receive clean strings
+		if (hasNewline) {
+			this->packet[this->packetLen - 1] = '\0';
+		}
 
 		if( !this->useCRC ){
 			
@@ -236,79 +241,22 @@ uint8_t GCode::process(void){
 	return GCODE_PACKET_NONE;
 }
 
-/* 
-uint8_t GCode::read(void) {
-
-	static bool inPacket = false; 	// New packet is incoming
-	static uint32_t lastChar = 0; 	// When last byte was received
-	static uint8_t packetLen = 0;	// Lenght of current packet
-
-	char buf;		 // Variable to hold each new byte
-	float crc; // Variable to hold checksum 
-	char *crcStart;
-
-	// If no packet is incoming, and some old packet is still in the buffer
-	if ( inPacket == false && packetLen > 0) {
-		packetLen = 0;
-		memset(this->packet, 0, sizeof(this->packet));
-	}
-
-	// If data is received on the serial port
-	if (this->serialPort->available() > 0) {
-		lastChar = micros();
-
-		// Read the newest char from the UART buffer
-		buf = this->serialPort->read();
-
-		// Save the char in the buffer ( but limited by MAX_PACKET_SIZE )
-		if (packetLen < MAX_PACKET_SIZE - 1) {
-			this->packet[packetLen++] = buf;
-		}else{
-			return GCODE_PACKET_OVERFLOW;
-		}
-
-		// A new packet is being read.
-		inPacket = true;
-	}
-
-	// If the timeout has been reached, or a newline has been received the string is complete
-	if ((micros() - lastChar >= PACKET_TIMEOUT || buf == '\n') && inPacket == true) {
-		inPacket = false;
-
-		if( !this->useCRC ){
-
-			return GCODE_PACKET_READY;
-		
-		}else if (this->value("*", &crc)) { // Check for checksum
-			// Checksum appended, check if it correct
-			if ((uint8_t)crc == 0xff) {
-				return GCODE_PACKET_READY;
-			}else{
-				return GCODE_PACKET_CRC_UNVALID;
-			}
-		}else{
-			return GCODE_PACKET_CRC_MISSING;
-		}
-	}
-
-	return GCODE_PACKET_NONE;
-} */
-
 void GCode::send(char *command) { 
 	this->send(command, this->useCRC);
 }
 
 void GCode::send(char *command, bool checksum)
 {
-	char buf[MAX_PACKET_SIZE] = {'\0'};
-	strcpy(buf, command);
+	char buf[MAX_PACKET_SIZE + 8] = {'\0'};
+	strncpy(buf, command, sizeof(buf) - 8);
+	buf[sizeof(buf) - 8] = '\0';
 
 	if (checksum) {
-		strcat(buf, " *255"); // Append checksum, should be calculated from entire string
+		strncat(buf, " *255", sizeof(buf) - strlen(buf) - 1);
 	}
 
 	// Always append a newline to indicate end of command
-	strcat(buf, "\n");
+	strncat(buf, "\n", sizeof(buf) - strlen(buf) - 1);
 
 	if( this->sendFunc != NULL )
 		this->sendFunc(buf);
